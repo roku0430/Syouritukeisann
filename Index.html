@@ -1,0 +1,1362 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>デッキ別勝率トラッカー (遊戯王MD)</title>
+    <!-- Tailwind CSS CDNを読み込み -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js CDNを読み込み (グラフ表示用) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <style>
+        /* 日本語フォントを優先 */
+        body {
+            font-family: 'Inter', 'Noto Sans JP', sans-serif;
+            background-color: #f7f7f7;
+        }
+        .card {
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-2px);
+        }
+        .btn-record {
+            background-color: #4f46e5; /* インディゴ */
+            border: 2px solid #4338ca;
+            transition: all 0.15s;
+        }
+        .btn-record:hover {
+            background-color: #4338ca;
+            transform: scale(1.02);
+        }
+        .modal {
+            transition: opacity 0.3s ease-in-out;
+        }
+        /* Chart.jsのコンテナが親要素に対して適切にサイズ変更されるようにする */
+        .chart-container {
+            max-width: 100%;
+            height: 384px; /* グラフの高さ固定 */
+            display: flex; /* グラフを中央に配置するために flex を使用 */
+            justify-content: center;
+            align-items: center;
+        }
+        /* グラフタブのアクティブ状態 */
+        .tab-active {
+            border-bottom-color: #4f46e5;
+            color: #4f46e5;
+            font-weight: bold;
+        }
+    </style>
+    <!-- Interフォントを使用 -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <!-- メインコンテナ -->
+    <div class="w-full max-w-lg">
+        <div class="card bg-white p-8 rounded-xl space-y-8">
+            <h1 class="text-4xl font-bold text-center text-gray-800">デッキ別勝率トラッカー (遊戯王MD対応)</h1>
+            <p id="auth-status" class="text-center text-sm text-gray-500">認証中...</p>
+            
+            <!-- アプリケーションメッセージ表示エリア -->
+            <div id="app-message" style="display:none;" class="p-3 rounded-lg text-sm transition-all duration-300"></div>
+
+            <!-- デッキ選択と追加エリア -->
+            <div class="space-y-3">
+                <label for="deck-select" class="block text-sm font-medium text-gray-700">現在のデッキ</label>
+                <div class="flex space-x-2">
+                    <select id="deck-select" class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 bg-white" disabled>
+                        <option value="">デッキを選択または追加してください</option>
+                    </select>
+                    <button id="add-deck-btn" class="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center disabled:opacity-50" disabled>
+                        <span class="text-xl">+</span>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- 全体の統計表示エリア (全デッキの合算) -->
+            <div class="p-4 bg-gray-100 rounded-xl space-y-2 border border-gray-300">
+                <h2 class="text-lg font-bold text-gray-700 text-center">🏆 全体統計 (全デッキの合算)</h2>
+                <div class="grid grid-cols-3 gap-2 text-center text-sm">
+                    <div class="p-1 bg-white rounded">
+                        <p class="text-xs text-gray-500">W/L</p>
+                        <p id="global-wl-display" class="font-bold text-gray-800">0/0</p>
+                    </div>
+                    <div class="p-1 bg-white rounded">
+                        <p class="text-xs text-gray-500">合計</p>
+                        <p id="global-total-display" class="font-bold text-gray-800">0</p>
+                    </div>
+                    <div class="p-1 bg-white rounded bg-yellow-50">
+                        <p class="text-xs text-yellow-800 font-semibold">全体勝率</p>
+                        <p id="global-win-rate-display" class="text-xl font-extrabold text-yellow-600">0.00%</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- コイントス別統計表示エリア -->
+            <div id="coin-stats-area" class="p-4 bg-yellow-50 rounded-xl space-y-3 border border-yellow-200 transition-opacity duration-300 opacity-50 pointer-events-none">
+                <h2 class="text-lg font-bold text-yellow-700 text-center">🪙 コイントス別勝率 (選択中デッキ)</h2>
+                <div class="grid grid-cols-2 gap-4 text-center">
+                    <!-- 勝利時 -->
+                    <div class="p-3 bg-white rounded-lg">
+                        <p class="text-sm font-semibold text-gray-600">勝利時勝率</p>
+                        <p id="coin-win-rate-display" class="text-2xl font-extrabold text-green-600 mt-1">0.00%</p>
+                        <p id="coin-win-wl-display" class="text-xs text-gray-500 mt-1">0W / 0L</p>
+                    </div>
+                    <!-- 敗北時 -->
+                    <div class="p-3 bg-white rounded-lg">
+                        <p class="text-sm font-semibold text-gray-600">敗北時勝率</p>
+                        <p id="coin-loss-rate-display" class="text-2xl font-extrabold text-red-600 mt-1">0.00%</p>
+                        <p id="coin-loss-wl-display" class="text-xs text-gray-500 mt-1">0W / 0L</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 先行/後攻統計表示エリア -->
+            <div id="first-second-stats" class="p-4 bg-indigo-50 rounded-xl space-y-3 border border-indigo-200 transition-opacity duration-300 opacity-50 pointer-events-none">
+                <h2 class="text-lg font-bold text-indigo-700 text-center">⚔️ 選択した行動 (先行/後攻) 勝率 (選択中デッキ)</h2>
+                <div class="grid grid-cols-2 gap-4 text-center">
+                    <div class="p-3 bg-white rounded-lg">
+                        <p class="text-sm font-semibold text-gray-600">先行勝率 (1st Win Rate)</p>
+                        <p id="first-win-rate-display" class="text-2xl font-extrabold text-blue-600 mt-1">0.00%</p>
+                        <p id="first-wl-display" class="text-xs text-gray-500 mt-1">0W / 0L</p>
+                    </div>
+                    <!-- 修正: 後攻勝率の表示 -->
+                    <div class="p-3 bg-white rounded-lg">
+                        <p class="text-sm font-semibold text-gray-600">後攻勝率 (2nd Win Rate)</p>
+                        <p id="second-win-rate-display" class="text-2xl font-extrabold text-red-600 mt-1">0.00%</p>
+                        <p id="second-wl-display" class="text-xs text-gray-500 mt-1">0W / 0L</p>
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- 選択中のデッキ統計表示 -->
+            <div id="stats-area" class="space-y-4 transition-opacity duration-300 opacity-50 pointer-events-none">
+                <p class="text-2xl font-bold text-center text-indigo-700" id="current-deck-name">デッキを選択してください</p>
+
+                <div class="grid grid-cols-2 gap-4 text-center border-t border-b py-4">
+                    <!-- 勝利数 -->
+                    <div class="p-3 bg-green-50 rounded-lg">
+                        <p class="text-sm font-semibold text-gray-600">勝利数 (W)</p>
+                        <p id="wins-display" class="text-4xl font-extrabold text-green-600 mt-1">0</p>
+                    </div>
+                    <!-- 敗北数 -->
+                    <div class="p-3 bg-red-50 rounded-lg">
+                        <p class="text-sm font-semibold text-gray-600">敗北数 (L)</p>
+                        <p id="losses-display" class="text-4xl font-extrabold text-red-600 mt-1">0</p>
+                    </div>
+                </div>
+
+                <div class="text-center space-y-4">
+                    <!-- 勝率表示 -->
+                    <div class="p-4 bg-blue-50 rounded-xl border border-blue-200">
+                        <p class="text-sm font-semibold text-blue-800">このデッキの全体勝率 (Win Rate)</p>
+                        <p id="win-rate-display" class="text-5xl font-extrabold text-blue-600 mt-1">0.00%</p>
+                    </div>
+
+                    <!-- 合計試合数 -->
+                    <p class="text-lg font-medium text-gray-700">合計試合数: <span id="total-games-display" class="font-bold text-xl text-indigo-600">0</span></p>
+                </div>
+                
+                <!-- グラフ表示ボタン -->
+                <div class="flex pt-4">
+                    <button id="open-charts-modal-btn" class="w-full py-3 text-white text-lg font-bold rounded-xl bg-purple-500 hover:bg-purple-600 focus:outline-none focus:ring-4 focus:ring-purple-300 disabled:opacity-50" disabled>
+                        <span class="mr-2">📈</span> グラフを表示・分析
+                    </button>
+                </div>
+
+                <!-- 操作ボタン: 試合記録モーダルを開く -->
+                <div class="flex">
+                    <button id="open-record-modal-btn" class="btn-record w-full py-4 text-white text-xl font-bold rounded-xl focus:outline-none focus:ring-4 focus:ring-indigo-300 disabled:opacity-50" disabled>
+                        <span class="text-2xl mr-2">✍️</span> 試合結果を記録
+                    </button>
+                </div>
+
+                <!-- 対戦相手別勝率エリア (リスト表示は残す) -->
+                <div class="p-4 bg-purple-50 rounded-xl space-y-3 border border-purple-200">
+                    <h3 class="text-xl font-bold text-purple-700 text-center">⚔️ 対戦相手別勝率 (リスト)</h3>
+                    <div id="opponent-stats-list" class="space-y-2">
+                        <!-- ここに対戦相手ごとの統計が表示されます -->
+                        <p class="text-center text-gray-500 text-sm">記録された試合がありません。</p>
+                    </div>
+                </div>
+                
+                <!-- リセットボタン -->
+                <div class="text-center">
+                    <button id="reset-btn" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold py-2 px-6 rounded-full text-sm disabled:opacity-50" disabled>
+                        このデッキの記録を全てリセット
+                    </button>
+                </div>
+            </div>
+
+            <!-- ユーザーID表示（デバッグ用） -->
+            <p class="text-xs text-gray-400 mt-4 break-all">ユーザーID: <span id="user-id-display">N/A</span></p>
+        </div>
+    </div>
+
+    <!-- デッキ追加モーダル (MODAL 1) -->
+    <div id="deck-modal" class="modal hidden fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center p-4 z-50">
+        <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-sm space-y-4">
+            <h3 class="text-xl font-bold text-gray-800">新しいデッキの追加</h3>
+            <input type="text" id="new-deck-name-input" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" placeholder="デッキ名を入力してください (例: 赤単アグロ)">
+            <div id="deck-name-error" class="text-red-500 text-sm hidden">デッキ名は必須です。</div>
+            <div class="flex justify-end space-x-3">
+                <button id="deck-modal-cancel-btn" class="px-4 py-2 bg-gray-200 text-gray-700 font-medium rounded-lg hover:bg-gray-300">キャンセル</button>
+                <button id="deck-modal-add-btn" class="px-4 py-2 bg-indigo-500 text-white font-medium rounded-lg hover:bg-indigo-600 disabled:opacity-50" disabled>追加</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 試合記録モーダル (MODAL 2) -->
+    <div id="record-modal" class="modal hidden fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center p-4 z-50">
+        <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-sm space-y-6">
+            <h3 class="text-2xl font-bold text-gray-800 text-center">試合結果を記録</h3>
+            
+            <div class="space-y-3">
+                <label for="opponent-deck-input" class="block text-sm font-medium text-gray-700">対戦相手のデッキ名</label>
+                <input type="text" id="opponent-deck-input" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" placeholder="例: 青黒コントロール">
+                <div id="opponent-deck-error" class="text-red-500 text-sm hidden">相手のデッキ名は必須です。</div>
+            </div>
+
+            <!-- コイントス結果の選択 -->
+            <div class="space-y-3 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
+                <p class="block text-sm font-medium text-gray-700">1. 🪙 コイントスの結果</p>
+                <div class="flex space-x-4 justify-center">
+                    <label class="inline-flex items-center">
+                        <input type="radio" name="coin-result" value="win" class="form-radio text-green-600 h-5 w-5" checked>
+                        <span class="ml-2 text-gray-800 font-medium">勝利 (Win)</span>
+                    </label>
+                    <label class="inline-flex items-center">
+                        <input type="radio" name="coin-result" value="loss" class="form-radio text-red-600 h-5 w-5">
+                        <span class="ml-2 text-gray-800 font-medium">敗北 (Loss)</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- 選択した行動 (先行/後攻) の選択 -->
+            <div class="space-y-3 p-3 bg-indigo-50 rounded-lg border border-indigo-200">
+                <p class="block text-sm font-medium text-gray-700">2. ⚔️ 選択した行動 (先行/後攻)</p>
+                <div class="flex space-x-4 justify-center">
+                    <label class="inline-flex items-center">
+                        <input type="radio" name="starting-player" value="first" class="form-radio text-blue-600 h-5 w-5" checked>
+                        <span class="ml-2 text-gray-800 font-medium">先行 (1st)</span>
+                    </label>
+                    <label class="inline-flex items-center">
+                        <input type="radio" name="starting-player" value="second" class="form-radio text-red-600 h-5 w-5">
+                        <span class="ml-2 text-gray-800 font-medium">後攻 (2nd)</span>
+                    </label>
+                </div>
+                <div id="starting-player-error" class="text-red-500 text-sm hidden text-center">先行/後攻を選択してください。</div>
+            </div>
+            
+            <div class="flex space-x-4">
+                <button id="record-win-btn" class="w-1/2 py-3 text-white text-lg font-bold rounded-xl bg-green-500 hover:bg-green-600 disabled:opacity-50">
+                    <span class="text-xl mr-1">🏆</span> 勝利
+                </button>
+                <button id="record-loss-btn" class="w-1/2 py-3 text-white text-lg font-bold rounded-xl bg-red-500 hover:bg-red-600 disabled:opacity-50">
+                    <span class="text-xl mr-1">😞</span> 敗北
+                </button>
+            </div>
+
+            <div class="text-right">
+                <button id="record-modal-cancel-btn" class="px-4 py-2 bg-gray-200 text-gray-700 font-medium rounded-lg hover:bg-gray-300">キャンセル</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 確認モーダル (MODAL 3: リセット用) -->
+    <div id="confirm-modal" class="modal hidden fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center p-4 z-50">
+        <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-sm space-y-4">
+            <p class="text-lg font-semibold text-gray-800" id="confirm-modal-message">本当にこのデッキの記録をリセットしますか？</p>
+            <div class="flex justify-end space-x-3">
+                <button id="confirm-cancel-btn" class="px-4 py-2 bg-gray-200 text-gray-700 font-medium rounded-lg hover:bg-gray-300">キャンセル</button>
+                <button id="confirm-ok-btn" class="px-4 py-2 bg-red-500 text-white font-medium rounded-lg hover:bg-red-600">リセット</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- グラフ表示モーダル (MODAL 4) -->
+    <div id="charts-modal" class="modal hidden fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center p-4 z-50">
+        <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-2xl h-5/6 flex flex-col space-y-4">
+            <h3 class="text-2xl font-bold text-gray-800 text-center border-b pb-2" id="charts-modal-title">📈 デッキ分析グラフ</h3>
+            
+            <!-- タブナビゲーション -->
+            <div class="flex justify-center border-b border-gray-200">
+                <button data-chart="win-loss" class="chart-tab px-4 py-2 text-gray-500 hover:text-indigo-600 border-b-2 border-transparent transition-colors">
+                    勝敗内訳
+                </button>
+                <button data-chart="matchup" class="chart-tab px-4 py-2 text-gray-500 hover:text-indigo-600 border-b-2 border-transparent transition-colors">
+                    マッチアップ勝率
+                </button>
+                <button data-chart="trend" class="chart-tab px-4 py-2 text-gray-500 hover:text-indigo-600 border-b-2 border-transparent transition-colors tab-active">
+                    勝率変動 (時系列)
+                </button>
+            </div>
+
+            <!-- グラフ表示エリア -->
+            <div class="flex-grow overflow-auto p-2">
+                <!-- 勝敗内訳 (ドーナツ) -->
+                <div id="chart-win-loss" class="chart-container" style="display:none;">
+                    <canvas id="winLossChart"></canvas>
+                </div>
+                <!-- マッチアップ勝率 (棒グラフ) -->
+                <div id="chart-matchup" class="chart-container" style="display:none;">
+                    <canvas id="matchupBarChart"></canvas>
+                </div>
+                <!-- 勝率変動 (折れ線) -->
+                <div id="chart-trend" class="chart-container" style="display:flex;">
+                    <canvas id="winRateTrendChart"></canvas>
+                </div>
+
+                <!-- データがない場合のメッセージ -->
+                <div id="chart-no-data" class="h-full flex items-center justify-center text-gray-500 text-center" style="display:none;">
+                    <p class="text-xl">📊 試合記録がないため、グラフを表示できません。</p>
+                </div>
+            </div>
+
+            <div class="text-right border-t pt-4">
+                <button id="charts-modal-close-btn" class="px-4 py-2 bg-indigo-500 text-white font-medium rounded-lg hover:bg-indigo-600">閉じる</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Firebaseのインポートとスクリプト -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { 
+            getFirestore, 
+            doc, 
+            setDoc, 
+            onSnapshot, 
+            collection, 
+            query, 
+            addDoc, 
+            setLogLevel, 
+            getDocs,
+            deleteDoc,
+            writeBatch,
+            orderBy,
+            serverTimestamp 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // Firestoreのログレベルを設定
+        setLogLevel('debug');
+
+        // グローバル変数の定義
+        let app;
+        let db;
+        let auth;
+        let userId = null;
+        let unsubscribeDecks = null; // デッキリスナー解除用
+        let unsubscribeMatches = null; // 試合結果リスナー解除用
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        
+        // Chart.js インスタンスをグローバルで保持
+        let winLossChartInstance = null;
+        let matchupBarChartInstance = null;
+        let winRateTrendChartInstance = null; 
+        let currentChartType = 'trend'; // デフォルトを 'trend' (勝率変動) に設定
+
+        // DOM要素の取得
+        const deckSelect = document.getElementById('deck-select');
+        const addDeckBtn = document.getElementById('add-deck-btn');
+        const currentDeckNameDisplay = document.getElementById('current-deck-name');
+        const winsDisplay = document.getElementById('wins-display');
+        const lossesDisplay = document.getElementById('losses-display');
+        const totalGamesDisplay = document.getElementById('total-games-display');
+        const winRateDisplay = document.getElementById('win-rate-display');
+        const authStatus = document.getElementById('auth-status');
+        const userIdDisplay = document.getElementById('user-id-display');
+        const openRecordModalBtn = document.getElementById('open-record-modal-btn');
+        const openChartsModalBtn = document.getElementById('open-charts-modal-btn'); 
+        const resetBtn = document.getElementById('reset-btn');
+        const statsArea = document.getElementById('stats-area');
+        const opponentStatsList = document.getElementById('opponent-stats-list'); 
+        const appMessage = document.getElementById('app-message');
+
+        // 先行/後攻関連のDOM要素
+        const firstSecondStatsArea = document.getElementById('first-second-stats');
+        const firstWinRateDisplay = document.getElementById('first-win-rate-display');
+        const firstWLDisplay = document.getElementById('first-wl-display');
+        const secondWinRateDisplay = document.getElementById('second-win-rate-display');
+        const secondWLDisplay = document.getElementById('second-wl-display');
+        
+        // コイントス関連のDOM要素
+        const coinStatsArea = document.getElementById('coin-stats-area');
+        const coinWinRateDisplay = document.getElementById('coin-win-rate-display');
+        const coinWinWLDisplay = document.getElementById('coin-win-wl-display');
+        const coinLossRateDisplay = document.getElementById('coin-loss-rate-display');
+        const coinLossWLDisplay = document.getElementById('coin-loss-wl-display');
+        
+        // グローバル統計関連のDOM要素
+        const globalWlDisplay = document.getElementById('global-wl-display');
+        const globalTotalDisplay = document.getElementById('global-total-display');
+        const globalWinRateDisplay = document.getElementById('global-win-rate-display');
+
+        // モーダル要素
+        const deckModal = document.getElementById('deck-modal');
+        const newDeckNameInput = document.getElementById('new-deck-name-input');
+        const deckModalAddBtn = document.getElementById('deck-modal-add-btn');
+        const deckModalCancelBtn = document.getElementById('deck-modal-cancel-btn');
+        const deckNameError = document.getElementById('deck-name-error');
+        const confirmModal = document.getElementById('confirm-modal');
+        const confirmOkBtn = document.getElementById('confirm-ok-btn');
+        const confirmCancelBtn = document.getElementById('confirm-cancel-btn');
+        const recordModal = document.getElementById('record-modal');
+        const opponentDeckInput = document.getElementById('opponent-deck-input');
+        const opponentDeckError = document.getElementById('opponent-deck-error');
+        const recordWinBtn = document.getElementById('record-win-btn');
+        const recordLossBtn = document.getElementById('record-loss-btn');
+        const recordModalCancelBtn = document.getElementById('record-modal-cancel-btn');
+        
+        // 記録モーダル内のコイントス要素
+        const coinResultInputs = document.querySelectorAll('input[name="coin-result"]'); 
+        const startingPlayerInputs = document.querySelectorAll('input[name="starting-player"]');
+
+        // グラフ関連のDOM要素
+        const chartsModal = document.getElementById('charts-modal');
+        const chartsModalTitle = document.getElementById('charts-modal-title');
+        const chartTabs = document.querySelectorAll('.chart-tab');
+        const chartContainers = {
+            'win-loss': document.getElementById('chart-win-loss'),
+            'matchup': document.getElementById('chart-matchup'),
+            'trend': document.getElementById('chart-trend')
+        };
+        const chartNoData = document.getElementById('chart-no-data');
+
+
+        // アプリケーションの状態
+        let decks = []; 
+        let selectedDeckId = null;
+        let selectedDeckMatches = []; 
+        let allMatches = []; // ★追加: 全デッキの試合結果をフラットに格納する配列 (グローバル統計用)
+        let currentDeckStats = { 
+            wins: 0, 
+            losses: 0, 
+            total: 0, 
+            opponentStats: {},
+            firstStats: { wins: 0, losses: 0 },
+            secondStats: { wins: 0, losses: 0 },
+            coinStats: { 
+                win: { wins: 0, losses: 0 },
+                loss: { wins: 0, losses: 0 }
+            }
+        };
+
+        /**
+         * モーダルの表示/非表示を切り替える汎用関数
+         */
+        function toggleModal(modalElement, isVisible) {
+            modalElement.classList.toggle('hidden', !isVisible);
+        }
+
+        /**
+         * メッセージを画面上部に表示する
+         */
+        function showMessage(msg, type = 'info') {
+            appMessage.textContent = msg;
+            appMessage.style.display = 'block';
+            appMessage.className = `p-3 rounded-lg text-sm mb-4 transition-all duration-300`;
+
+            switch (type) {
+                case 'success':
+                    appMessage.classList.add('bg-green-100', 'text-green-800', 'border', 'border-green-300');
+                    break;
+                case 'error':
+                    appMessage.classList.add('bg-red-100', 'text-red-800', 'border', 'border-red-300');
+                    break;
+                case 'warning':
+                    appMessage.classList.add('bg-yellow-100', 'text-yellow-800', 'border', 'border-yellow-300');
+                    break;
+                case 'info':
+                default:
+                    appMessage.classList.add('bg-blue-100', 'text-blue-800', 'border', 'border-blue-300');
+                    break;
+            }
+
+            // 4秒後にメッセージをクリア
+            clearTimeout(window.messageTimeout);
+            window.messageTimeout = setTimeout(() => {
+                appMessage.style.display = 'none';
+                appMessage.textContent = '';
+                appMessage.className = 'p-3 rounded-lg text-sm mb-4 transition-all duration-300';
+            }, 4000);
+        }
+
+        /**
+         * デッキコレクションリファレンスを取得
+         */
+        function getDeckCollectionRef() {
+            if (!db || !userId) return null;
+            return collection(db, 'artifacts', appId, 'users', userId, 'decks');
+        }
+        
+        /**
+         * 選択中のデッキの試合結果コレクションリファレンスを取得
+         */
+        function getMatchResultsCollectionRef(deckId = selectedDeckId) {
+            if (!db || !userId || !deckId) return null;
+            const deckDocRef = doc(db, 'artifacts', appId, 'users', userId, 'decks', deckId);
+            return collection(deckDocRef, 'match_results');
+        }
+
+        /**
+         * 新しいデッキをFirestoreに追加
+         */
+        async function addDeck(name) {
+            const colRef = getDeckCollectionRef();
+            if (!colRef) {
+                throw new Error("認証が完了していません。");
+            }
+
+            // addDocが成功すれば、onSnapshotが発火し、UIが更新される
+            await addDoc(colRef, {
+                name: name,
+                createdAt: serverTimestamp(),
+            });
+            console.log("デッキ追加成功:", name);
+        }
+
+        /**
+         * ★追加: 全てのデッキの試合結果をFirestoreから非同期で取得し、グローバル統計を更新
+         */
+        async function fetchAllMatchesForGlobalStats(decksList) {
+            if (!db || !userId) {
+                renderGlobalStats(); // 認証/データなしの場合はリセット
+                return;
+            }
+
+            allMatches = []; // 全体の試合結果をリセット
+            const fetchPromises = [];
+
+            for (const deck of decksList) {
+                const colRef = getMatchResultsCollectionRef(deck.id);
+                if (colRef) {
+                    // getDocsを使用して試合結果を非同期で取得
+                    fetchPromises.push(getDocs(colRef).then(snapshot => {
+                        const deckMatches = [];
+                        snapshot.forEach(doc => {
+                            const data = doc.data();
+                            if (data.timestamp && data.timestamp.toDate) {
+                                data.timestamp = data.timestamp.toDate();
+                            }
+                            // どのデッキの結果かわかるようにdeckIdを付与
+                            deckMatches.push({ id: doc.id, deckId: deck.id, ...data });
+                        });
+                        return deckMatches;
+                    }));
+                }
+            }
+
+            try {
+                const results = await Promise.all(fetchPromises);
+                results.forEach(deckMatches => {
+                    allMatches.push(...deckMatches); // 全試合結果を結合
+                });
+                
+                // 全試合結果を取得後、グローバル統計をレンダリング
+                renderGlobalStats();
+
+            } catch (error) {
+                console.error("グローバル統計用試合結果の取得中にエラー:", error);
+                showMessage("全デッキの統計ロード中にエラーが発生しました。", 'error');
+            }
+        }
+        
+        /**
+         * デッキ一覧のリアルタイムリスナーを設定
+         */
+        function setupDeckListener() {
+            if (unsubscribeDecks) unsubscribeDecks(); 
+            
+            const colRef = getDeckCollectionRef();
+            if (!colRef) return;
+
+            const q = query(colRef, orderBy('createdAt', 'desc')); 
+
+            unsubscribeDecks = onSnapshot(q, async (snapshot) => {
+                decks = [];
+                snapshot.forEach(doc => {
+                    decks.push({ id: doc.id, ...doc.data() });
+                });
+                
+                // 選択中のデッキIDがまだ存在するか確認
+                const currentDeckExists = decks.some(d => d.id === selectedDeckId);
+
+                // もし選択中のIDが存在しない、またはまだ何も選択されていない場合
+                if (!currentDeckExists && decks.length > 0) {
+                    selectedDeckId = decks[0].id;
+                } else if (decks.length === 0) {
+                    selectedDeckId = null;
+                }
+
+                // ★修正点: デッキリストが更新されたら、グローバル統計を更新
+                await fetchAllMatchesForGlobalStats(decks); 
+                
+                // マッチ結果リスナーを再設定（選択デッキが変わった可能性があるため）
+                setupMatchResultsListener(); 
+                renderApp();
+            }, (error) => {
+                console.error("デッキのリアルタイム取得エラー:", error);
+                showMessage("デッキのロード中にエラーが発生しました。", 'error');
+            });
+        }
+
+        /**
+         * 選択中のデッキの試合結果リスナーを設定
+         */
+        function setupMatchResultsListener() {
+            if (unsubscribeMatches) unsubscribeMatches(); // 既存のリスナーを解除
+
+            const colRef = getMatchResultsCollectionRef();
+            if (!colRef || !selectedDeckId) {
+                selectedDeckMatches = [];
+                renderApp();
+                return;
+            }
+
+            // 時系列グラフのためにtimestampで昇順ソートする
+            const q = query(colRef, orderBy('timestamp', 'asc'));
+
+            unsubscribeMatches = onSnapshot(q, (snapshot) => {
+                selectedDeckMatches = [];
+                snapshot.forEach(doc => {
+                    // Firebase TimestampをJavaScript Dateオブジェクトに変換（もしあれば）
+                    const data = doc.data();
+                    if (data.timestamp && data.timestamp.toDate) {
+                        data.timestamp = data.timestamp.toDate();
+                    }
+                    selectedDeckMatches.push({ id: doc.id, ...data });
+                });
+                
+                // ★修正点: 単一デッキの試合結果が変わった場合、グローバル統計を再取得・更新
+                fetchAllMatchesForGlobalStats(decks);
+                
+                renderApp();
+            }, (error) => {
+                console.error("試合結果のリアルタイム取得エラー:", error);
+            });
+        }
+
+        // --- Chart.js グラフ描画関連の関数 (変更なし) ---
+
+        /**
+         * 既存のChart.jsインスタンスをすべて破棄する
+         */
+        function destroyChartInstances() {
+            if (winLossChartInstance) {
+                winLossChartInstance.destroy();
+                winLossChartInstance = null;
+            }
+            if (matchupBarChartInstance) {
+                matchupBarChartInstance.destroy();
+                matchupBarChartInstance = null;
+            }
+            if (winRateTrendChartInstance) {
+                winRateTrendChartInstance.destroy();
+                winRateTrendChartInstance = null;
+            }
+        }
+
+        /**
+         * 勝利/敗北の内訳グラフ (ドーナツチャート) を描画
+         */
+        function renderWinLossChart() {
+            const ctx = document.getElementById('winLossChart').getContext('2d');
+            const data = {
+                labels: ['勝利 (W)', '敗北 (L)'],
+                datasets: [{
+                    label: '勝敗数',
+                    data: [currentDeckStats.wins, currentDeckStats.losses],
+                    backgroundColor: [
+                        'rgb(16, 185, 129)', // Tailwind green-500
+                        'rgb(239, 68, 68)'   // Tailwind red-500
+                    ],
+                    hoverOffset: 8
+                }]
+            };
+
+            destroyChartInstances();
+
+            winLossChartInstance = new Chart(ctx, {
+                type: 'doughnut',
+                data: data,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            labels: {
+                                padding: 20
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: '勝利 vs 敗北 の内訳',
+                            font: { size: 16 }
+                        }
+                    }
+                }
+            });
+        }
+
+        /**
+         * 対戦相手別勝率グラフ (棒グラフ) を描画
+         */
+        function renderMatchupBarChart() {
+            const ctx = document.getElementById('matchupBarChart').getContext('2d');
+            
+            const opponentData = Object.entries(currentDeckStats.opponentStats)
+                .map(([name, stats]) => ({
+                    name,
+                    total: stats.wins + stats.losses,
+                    rate: stats.wins + stats.losses > 0 ? (stats.wins / (stats.wins + stats.losses)) : 0,
+                    wins: stats.wins,
+                    losses: stats.losses
+                }))
+                .filter(d => d.total > 0)
+                .sort((a, b) => b.rate - a.rate); // 勝率で降順ソート
+
+            const labels = opponentData.map(d => d.name);
+            const rates = opponentData.map(d => (d.rate * 100).toFixed(1));
+            const tooltips = opponentData.map(d => `${d.wins}W / ${d.losses}L`);
+            
+            destroyChartInstances();
+
+            matchupBarChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: '勝率 (%)',
+                        data: rates,
+                        backgroundColor: opponentData.map(d => d.rate >= 0.5 ? 'rgb(59, 130, 246)' : 'rgb(249, 115, 22)'),
+                        borderColor: opponentData.map(d => d.rate >= 0.5 ? 'rgb(30, 64, 175)' : 'rgb(194, 65, 12)'),
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    indexAxis: 'y', // 横向きの棒グラフ
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        title: {
+                            display: true,
+                            text: '対戦相手別勝率 (試合数順)',
+                            font: { size: 16 }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const index = context.dataIndex;
+                                    return `${context.dataset.label}: ${context.parsed.x}% (${tooltips[index]})`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            max: 100,
+                            title: {
+                                display: true,
+                                text: '勝率 (%)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        /**
+         * 勝率変動グラフ (折れ線グラフ) を描画
+         */
+        function renderWinRateTrendChart() {
+            const ctx = document.getElementById('winRateTrendChart').getContext('2d');
+            
+            // 試合を時刻順（timestamp）に処理
+            const sortedMatches = selectedDeckMatches; 
+            if (sortedMatches.length === 0) return;
+
+            let cumulativeWins = 0;
+            let cumulativeTotal = 0;
+            const trendData = [];
+            const labels = [];
+
+            sortedMatches.forEach((match, index) => {
+                cumulativeTotal += 1;
+                if (match.result === 'win') {
+                    cumulativeWins += 1;
+                }
+                const winRate = (cumulativeWins / cumulativeTotal) * 100;
+                
+                trendData.push(winRate.toFixed(2));
+                
+                // ラベルは連番、または日付と時刻（FireStore TimestampがDateオブジェクトに変換されている前提）
+                const matchDate = match.timestamp instanceof Date ? match.timestamp : new Date();
+                labels.push(`${index + 1}試合目 (${matchDate.toLocaleDateString('ja-JP', { month: '2-digit', day: '2-digit' })})`);
+            });
+
+            destroyChartInstances();
+
+            winRateTrendChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: '累積勝率 (%)',
+                        data: trendData,
+                        borderColor: 'rgb(234, 88, 12)', // Tailwind orange-600
+                        backgroundColor: 'rgba(234, 88, 12, 0.1)',
+                        tension: 0.3,
+                        pointRadius: 3,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: true },
+                        title: {
+                            display: true,
+                            text: '累積勝率の変動 (時系列)',
+                            font: { size: 16 }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `累積勝率: ${context.parsed.y}%`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            min: 0,
+                            max: 100,
+                            title: { display: true, text: '勝率 (%)' }
+                        },
+                        x: {
+                            title: { display: true, text: '試合順' }
+                        }
+                    }
+                }
+            });
+        }
+
+
+        /**
+         * 指定されたグラフタイプを表示し、描画関数を呼び出す
+         */
+        function showChart(chartType) {
+            currentChartType = chartType;
+            const totalGames = currentDeckStats.total;
+
+            // 1. すべてのチャートコンテナを非表示にし、タブをリセット
+            Object.values(chartContainers).forEach(container => container.style.display = 'none');
+            chartNoData.style.display = 'none';
+            chartTabs.forEach(t => t.classList.remove('tab-active'));
+            document.querySelector(`.chart-tab[data-chart="${chartType}"]`).classList.add('tab-active');
+            
+            // 2. データがない場合はメッセージを表示
+            if (totalGames === 0) {
+                destroyChartInstances();
+                chartNoData.style.display = 'flex';
+                return;
+            }
+            
+            // 3. 該当のチャートを表示し、描画関数を呼び出す
+            const container = chartContainers[chartType];
+            container.style.display = 'flex'; // Chart.jsの描画にはコンテナが表示されている必要がある
+
+            switch (chartType) {
+                case 'win-loss':
+                    renderWinLossChart();
+                    break;
+                case 'matchup':
+                    renderMatchupBarChart();
+                    break;
+                case 'trend':
+                    renderWinRateTrendChart();
+                    break;
+            }
+        }
+        
+        // --- 統計情報の集計関数 (変更なし) ---
+        
+        /**
+         * 統計情報の集計を行う
+         */
+        function calculateStats(matches) {
+            return matches.reduce((acc, match) => {
+                const opponent = match.opponentDeck || '不明なデッキ';
+                if (!acc.opponentStats[opponent]) {
+                    acc.opponentStats[opponent] = { wins: 0, losses: 0 };
+                }
+
+                const startingPlayer = match.startingPlayer || 'unknown';
+                const coinResult = match.coinResult || 'unknown'; 
+
+                const isWin = match.result === 'win';
+                const isLoss = match.result === 'loss';
+
+                if (isWin) {
+                    acc.wins += 1;
+                    acc.opponentStats[opponent].wins += 1;
+                    if (startingPlayer === 'first') acc.firstStats.wins += 1; 
+                    if (startingPlayer === 'second') acc.secondStats.wins += 1; 
+                    if (coinResult === 'win') acc.coinStats.win.wins += 1;
+                    if (coinResult === 'loss') acc.coinStats.loss.wins += 1;
+                } else if (isLoss) {
+                    acc.losses += 1;
+                    acc.opponentStats[opponent].losses += 1;
+                    if (startingPlayer === 'first') acc.firstStats.losses += 1; 
+                    if (startingPlayer === 'second') acc.secondStats.losses += 1; 
+                    if (coinResult === 'win') acc.coinStats.win.losses += 1;
+                    if (coinResult === 'loss') acc.coinStats.loss.losses += 1;
+                }
+                acc.total = acc.wins + acc.losses;
+                return acc;
+            }, { 
+                wins: 0, 
+                losses: 0, 
+                total: 0, 
+                opponentStats: {},
+                firstStats: { wins: 0, losses: 0 }, 
+                secondStats: { wins: 0, losses: 0 },
+                coinStats: { 
+                    win: { wins: 0, losses: 0 },
+                    loss: { wins: 0, losses: 0 }
+                } 
+            });
+        }
+        
+        /**
+         * ★追加: 全ての試合結果 (allMatches) を使用して、グローバル統計をレンダリングする
+         */
+        function renderGlobalStats() {
+            const globalStats = calculateStats(allMatches);
+            const { wins, losses, total } = globalStats;
+            const winRate = total > 0 ? ((wins / total) * 100).toFixed(2) : '0.00';
+
+            globalWlDisplay.textContent = `${wins}/${losses}`;
+            globalTotalDisplay.textContent = total;
+            globalWinRateDisplay.textContent = `${winRate}%`;
+        }
+
+
+        /**
+         * 状態に基づいてUI全体をレンダリング (選択中デッキの統計のみを処理)
+         */
+        function renderApp() {
+            currentDeckStats = calculateStats(selectedDeckMatches);
+            const { wins, losses, total, opponentStats, firstStats, secondStats, coinStats } = currentDeckStats;
+            const winRate = total > 0 ? ((wins / total) * 100).toFixed(2) : '0.00';
+
+            // 先行/後攻の勝率計算
+            const firstTotal = firstStats.wins + firstStats.losses;
+            const firstWinRate = firstTotal > 0 ? ((firstStats.wins / firstTotal) * 100).toFixed(2) : '0.00';
+            const secondTotal = secondStats.wins + secondStats.losses;
+            const secondWinRate = secondTotal > 0 ? ((secondStats.wins / secondTotal) * 100).toFixed(2) : '0.00';
+            
+            // コイントス勝敗別の勝率計算
+            const coinWinTotal = coinStats.win.wins + coinStats.win.losses;
+            const coinWinRate = coinWinTotal > 0 ? ((coinStats.win.wins / coinWinTotal) * 100).toFixed(2) : '0.00';
+            const coinLossTotal = coinStats.loss.wins + coinStats.loss.losses;
+            const coinLossRate = coinLossTotal > 0 ? ((coinStats.loss.wins / coinLossTotal) * 100).toFixed(2) : '0.00';
+
+
+            // 1. デッキ選択ドロップダウンの更新
+            deckSelect.innerHTML = '<option value="">デッキを選択または追加してください</option>';
+            decks.forEach(deck => {
+                const option = document.createElement('option');
+                option.value = deck.id;
+                option.textContent = deck.name;
+                deckSelect.appendChild(option);
+            });
+            deckSelect.value = selectedDeckId || "";
+
+
+            const selectedDeck = decks.find(d => d.id === selectedDeckId);
+
+            if (selectedDeck) {
+                statsArea.classList.remove('opacity-50', 'pointer-events-none');
+                firstSecondStatsArea.classList.remove('opacity-50', 'pointer-events-none'); 
+                coinStatsArea.classList.remove('opacity-50', 'pointer-events-none'); 
+                
+                currentDeckNameDisplay.textContent = selectedDeck.name;
+                winsDisplay.textContent = wins;
+                lossesDisplay.textContent = losses;
+                totalGamesDisplay.textContent = total;
+                winRateDisplay.textContent = `${winRate}%`;
+
+                // 先行/後攻のUI更新
+                firstWinRateDisplay.textContent = `${firstWinRate}%`;
+                firstWLDisplay.textContent = `${firstStats.wins}W / ${firstStats.losses}L`;
+                secondWinRateDisplay.textContent = `${secondWinRate}%`;
+                secondWLDisplay.textContent = `${secondStats.wins}W / ${secondStats.losses}L`;
+
+                // コイントス結果のUI更新
+                coinWinRateDisplay.textContent = `${coinWinRate}%`;
+                coinWinWLDisplay.textContent = `${coinStats.win.wins}W / ${coinStats.win.losses}L`;
+                coinLossRateDisplay.textContent = `${coinLossRate}%`;
+                coinLossWLDisplay.textContent = `${coinStats.loss.wins}W / ${coinStats.loss.losses}L`;
+
+
+                // ボタンの有効化
+                openRecordModalBtn.disabled = false;
+                openChartsModalBtn.disabled = (total === 0); 
+                resetBtn.disabled = (total === 0);
+
+            } else {
+                statsArea.classList.add('opacity-50', 'pointer-events-none');
+                firstSecondStatsArea.classList.add('opacity-50', 'pointer-events-none'); 
+                coinStatsArea.classList.add('opacity-50', 'pointer-events-none'); 
+
+                currentDeckNameDisplay.textContent = "デッキを選択してください";
+                winsDisplay.textContent = '0';
+                lossesDisplay.textContent = '0';
+                totalGamesDisplay.textContent = '0';
+                winRateDisplay.textContent = '0.00%';
+
+                // 先行/後攻のUIリセット
+                firstWinRateDisplay.textContent = '0.00%';
+                firstWLDisplay.textContent = '0W / 0L';
+                secondWinRateDisplay.textContent = '0.00%';
+                secondWLDisplay.textContent = '0W / 0L';
+
+                // コイントス結果のUIリセット
+                coinWinRateDisplay.textContent = '0.00%';
+                coinWinWLDisplay.textContent = '0W / 0L';
+                coinLossRateDisplay.textContent = '0.00%';
+                coinLossWLDisplay.textContent = '0W / 0L';
+
+                // ボタンの無効化
+                openRecordModalBtn.disabled = true;
+                openChartsModalBtn.disabled = true;
+                resetBtn.disabled = true;
+            }
+
+            // 2. 対戦相手別勝率のリスト表示
+            opponentStatsList.innerHTML = '';
+            const opponentNames = Object.keys(opponentStats).sort();
+
+            if (opponentNames.length === 0) {
+                opponentStatsList.innerHTML = '<p class="text-center text-gray-500 text-sm">記録された試合がありません。</p>';
+            } else {
+                opponentNames.forEach(name => {
+                    const stats = opponentStats[name];
+                    const totalOpponentGames = stats.wins + stats.losses;
+                    const opponentWinRate = totalOpponentGames > 0 ? ((stats.wins / totalOpponentGames) * 100).toFixed(1) : '0.0';
+
+                    const item = document.createElement('div');
+                    item.className = 'flex justify-between items-center p-2 bg-white rounded-lg border border-purple-100';
+                    const rateColor = parseFloat(opponentWinRate) >= 50 ? 'text-green-600' : 'text-red-600';
+                    item.innerHTML = `
+                        <span class="text-sm font-semibold text-gray-700 truncate">${name}</span>
+                        <div class="text-right flex items-center space-x-2">
+                            <span class="text-xs text-gray-500">${stats.wins}W/${stats.losses}L</span>
+                            <span class="text-lg font-bold ${rateColor}">${opponentWinRate}%</span>
+                        </div>
+                    `;
+                    opponentStatsList.appendChild(item);
+                });
+            }
+        }
+
+        /**
+         * 試合結果をFirestoreに記録
+         */
+        async function recordMatchResult(result, opponentDeck, startingPlayer, coinResult) {
+            const colRef = getMatchResultsCollectionRef();
+            if (!colRef) {
+                showMessage("エラー: デッキが選択されていないか、認証が完了していません。", 'error');
+                return;
+            }
+
+            try {
+                const matchResult = {
+                    result: result,
+                    opponentDeck: opponentDeck.trim(),
+                    timestamp: serverTimestamp(), // サーバータイムスタンプを使用
+                    startingPlayer: startingPlayer,
+                    coinResult: coinResult 
+                };
+                await addDoc(colRef, matchResult);
+                showMessage("試合結果を記録しました。", 'success');
+            } catch (error) {
+                console.error("試合結果の記録中にエラーが発生しました:", error);
+                showMessage("試合結果の記録中にエラーが発生しました。", 'error');
+            }
+        }
+
+        /**
+         * 全ての試合結果を削除
+         */
+        async function deleteAllMatchResults() {
+            const colRef = getMatchResultsCollectionRef();
+            if (!colRef) return;
+
+            try {
+                // orderBy('timestamp', 'asc') を削除し、簡易的なクエリにする（バッチ処理のため）
+                const snapshot = await getDocs(colRef);
+                const batch = writeBatch(db);
+
+                if (snapshot.empty) {
+                    showMessage("削除対象の試合記録はありませんでした。", 'info');
+                    return;
+                }
+
+                snapshot.docs.forEach((d) => {
+                    batch.delete(d.ref);
+                });
+
+                await batch.commit();
+                showMessage(`デッキの試合記録を全てリセットしました。`, 'success');
+            } catch (error) {
+                console.error("試合記録の削除中にエラーが発生しました:", error);
+                showMessage("試合記録の削除中にエラーが発生しました。", 'error');
+            }
+        }
+
+        /**
+         * 確認モーダルの表示
+         */
+        function showConfirmModal(message) {
+            document.getElementById('confirm-modal-message').textContent = message;
+            toggleModal(confirmModal, true);
+            return new Promise((resolve) => {
+                const handleOk = () => {
+                    toggleModal(confirmModal, false);
+                    confirmOkBtn.removeEventListener('click', handleOk);
+                    confirmCancelBtn.removeEventListener('click', handleCancel);
+                    resolve(true);
+                };
+                const handleCancel = () => {
+                    toggleModal(confirmModal, false);
+                    confirmOkBtn.removeEventListener('click', handleOk);
+                    confirmCancelBtn.removeEventListener('click', handleCancel);
+                    resolve(false);
+                };
+                confirmOkBtn.addEventListener('click', handleOk);
+                confirmCancelBtn.addEventListener('click', handleCancel);
+            });
+        }
+        
+        /**
+         * Firebase初期化と認証
+         */
+        async function initFirebaseAndAuth() {
+            try {
+                if (!firebaseConfig || !firebaseConfig.apiKey) {
+                    authStatus.textContent = "Firebase設定が不足しています。";
+                    console.error("Firebase設定が不足しています。");
+                    return;
+                }
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                await setPersistence(auth, browserLocalPersistence);
+                const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        userIdDisplay.textContent = userId;
+                        authStatus.textContent = "認証済み。データをロード中...";
+                        deckSelect.disabled = false;
+                        addDeckBtn.disabled = false;
+                        setupDeckListener(); // 認証後、デッキリスナーを開始
+                    } else {
+                        userId = null;
+                        userIdDisplay.textContent = "未認証";
+                        authStatus.textContent = "未認証。匿名サインインを試みます...";
+                        deckSelect.disabled = true;
+                        addDeckBtn.disabled = true;
+                        openRecordModalBtn.disabled = true;
+                        openChartsModalBtn.disabled = true;
+                        resetBtn.disabled = true;
+                    }
+                });
+
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Firebaseの初期化または認証中にエラーが発生しました:", error);
+                authStatus.textContent = "認証エラー: " + error.message;
+                showMessage(`認証エラー: ${error.message}`, 'error');
+            }
+        }
+
+        // --- イベントリスナーの設定 ---
+
+        // デッキ選択ドロップダウンの変更
+        deckSelect.addEventListener('change', (e) => {
+            selectedDeckId = e.target.value;
+            setupMatchResultsListener();
+            renderApp();
+        });
+
+        // 試合記録モーダルを開く
+        openRecordModalBtn.addEventListener('click', () => {
+            opponentDeckInput.value = ''; 
+            opponentDeckError.classList.add('hidden'); 
+            coinResultInputs[0].checked = true;       // デフォルトでコイントス「勝利」
+            startingPlayerInputs[0].checked = true; // デフォルトで「先行」
+            toggleModal(recordModal, true);
+            opponentDeckInput.focus();
+        });
+
+        // 試合記録モーダル：キャンセル
+        recordModalCancelBtn.addEventListener('click', () => {
+            toggleModal(recordModal, false);
+        });
+        
+        // 試合記録モーダル：対戦相手デッキ名入力検証
+        opponentDeckInput.addEventListener('input', () => {
+            const name = opponentDeckInput.value.trim();
+            const disabled = name.length === 0;
+            recordWinBtn.disabled = disabled;
+            recordLossBtn.disabled = disabled;
+            if (disabled) {
+                opponentDeckError.classList.remove('hidden');
+            } else {
+                opponentDeckError.classList.add('hidden');
+            }
+        });
+
+        /** 試合記録ボタンの共通ハンドラ */
+        const handleRecordClick = async (result) => {
+            const opponentName = opponentDeckInput.value.trim();
+            const selectedStartingPlayer = document.querySelector('input[name="starting-player"]:checked');
+            const selectedCoinResult = document.querySelector('input[name="coin-result"]:checked'); 
+            
+            if (opponentName.length === 0) {
+                opponentDeckError.classList.remove('hidden');
+                return;
+            }
+            
+            if (!selectedStartingPlayer || !selectedCoinResult) {
+                console.error("必須項目が選択されていません。");
+                return;
+            }
+            
+            await recordMatchResult(result, opponentName, selectedStartingPlayer.value, selectedCoinResult.value);
+            toggleModal(recordModal, false);
+        };
+
+        // 試合記録モーダル：勝利を記録
+        recordWinBtn.addEventListener('click', () => handleRecordClick('win'));
+        
+        // 試合記録モーダル：敗北を記録
+        recordLossBtn.addEventListener('click', () => handleRecordClick('loss'));
+
+
+        // リセットボタン
+        resetBtn.addEventListener('click', async () => {
+            const deckName = decks.find(d => d.id === selectedDeckId)?.name || 'このデッキ';
+            const confirmed = await showConfirmModal(`デッキ「${deckName}」の**全ての試合記録**をリセット（削除）しますか？`);
+            
+            if (confirmed) {
+                await deleteAllMatchResults(); 
+            }
+        });
+
+        // デッキ追加ボタン（モーダル表示）
+        addDeckBtn.addEventListener('click', () => {
+            newDeckNameInput.value = ''; 
+            deckModalAddBtn.disabled = true; 
+            deckNameError.classList.add('hidden'); 
+            toggleModal(deckModal, true);
+            newDeckNameInput.focus();
+        });
+
+        // デッキ追加モーダル：キャンセル
+        deckModalCancelBtn.addEventListener('click', () => {
+            toggleModal(deckModal, false);
+        });
+
+        // デッキ追加モーダル：入力値検証
+        newDeckNameInput.addEventListener('input', () => {
+            const name = newDeckNameInput.value.trim();
+            if (name.length > 0) {
+                deckModalAddBtn.disabled = false;
+                deckNameError.classList.add('hidden');
+            } else {
+                deckModalAddBtn.disabled = true;
+            }
+        });
+        
+        // デッキ追加モーダル：追加実行 (修正・強化済みロジック)
+        deckModalAddBtn.addEventListener('click', async () => {
+            const deckName = newDeckNameInput.value.trim();
+            if (!deckName) {
+                deckNameError.classList.remove('hidden');
+                return;
+            }
+            
+            if (!userId) {
+                showMessage('エラー: 認証が完了していません。アプリを再ロードしてください。', 'error');
+                return;
+            }
+            
+            // UIを無効化して待機状態を示す
+            deckModalAddBtn.disabled = true;
+            deckModalAddBtn.textContent = '追加中...';
+
+            try {
+                await addDeck(deckName); 
+                toggleModal(deckModal, false);
+                showMessage(`デッキ「${deckName}」を追加しました。`, 'success');
+            } catch (e) {
+                console.error('デッキ追加失敗:', e);
+                showMessage('デッキの追加に失敗しました。認証状態とインターネット接続を確認してください。', 'error');
+            } finally {
+                // UIを元に戻す
+                deckModalAddBtn.textContent = '追加';
+                // 入力値が空でなければ、ボタンを再有効化する（今回はクリアするので無効化のまま）
+                deckModalAddBtn.disabled = true; 
+                newDeckNameInput.value = ''; // 入力フィールドをクリア
+            }
+        });
+
+        // グラフモーダルのリスナー
+        const chartsModalCloseBtn = document.getElementById('charts-modal-close-btn');
+
+        openChartsModalBtn.addEventListener('click', () => {
+             chartsModalTitle.textContent = `${decks.find(d => d.id === selectedDeckId)?.name || 'デッキ'} の分析グラフ`;
+             toggleModal(chartsModal, true);
+             // モーダルを開くときに、現在のチャートタイプを描画
+             showChart(currentChartType); 
+        });
+
+        chartsModalCloseBtn.addEventListener('click', () => {
+            destroyChartInstances(); // 閉じる際にインスタンスを破棄
+            toggleModal(chartsModal, false);
+        });
+
+        chartTabs.forEach(tab => {
+            tab.addEventListener('click', (e) => {
+                const chartType = e.target.getAttribute('data-chart');
+                showChart(chartType); // グラフ描画を実行
+            });
+        });
+
+
+        // アプリケーションの開始
+        window.onload = initFirebaseAndAuth;
+    </script>
+
+</body>
+</html>
+
